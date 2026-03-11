@@ -1,0 +1,21 @@
+# OpenClaw generated files
+evaluations.json
+lessons-learned.json
+optimization-plan.json
+performance-metrics.json
+collective-wisdom.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log
