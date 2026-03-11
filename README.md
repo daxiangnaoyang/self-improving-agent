@@ -78,18 +78,21 @@ $metrics = @{
     satisfaction = 85 # 满意度 0-100
 }
 
-& "$env:USERPROFILE\.openclaw\workspace-dajia\scripts\self-improvement\evaluate-task.ps1" `
-    -AgentId "dajia" `
+# 脚本会自动检测当前 workspace
+& "$env:USERPROFILE\.openclaw\workspace-<agent-id>\scripts\self-improvement\evaluate-task.ps1" `
+    -AgentId "<agent-id>" `
     -TaskId "task-001" `
     -TaskType "创作" `
     -Metrics $metrics
 ```
 
+**注意**: 将 `<agent-id>` 替换为实际的 Agent ID（例如：dajia, writer, creator 等）
+
 ### 记录经验教训
 
 ```powershell
-& "$env:USERPROFILE\.openclaw\workspace-dajia\scripts\self-improvement\learn-lesson.ps1" `
-    -AgentId "dajia" `
+& "$env:USERPROFILE\.openclaw\workspace-<agent-id>\scripts\self-improvement\learn-lesson.ps1" `
+    -AgentId "<agent-id>" `
     -Lesson "文章创作后要验证链接有效性" `
     -Impact "high" `
     -Category "quality"
@@ -98,7 +101,7 @@ $metrics = @{
 ### 跨Agent同步学习
 
 ```powershell
-& "$env:USERPROFILE\.openclaw\workspace-dajia\scripts\self-improvement\sync-learning.ps1"
+& "$env:USERPROFILE\.openclaw\workspace-<agent-id>\scripts\self-improvement\sync-learning.ps1"
 ```
 
 ## 数据结构

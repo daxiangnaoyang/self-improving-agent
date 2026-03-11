@@ -10,6 +10,49 @@
 
 ## 核心脚本
 
+### 0. 通用配置脚本
+
+保存为：`scripts/self-improvement/config.ps1`
+
+```powershell
+# 自动检测当前 Agent 工作区
+function Get-AgentWorkspace {
+    # 查找所有 workspace-* 目录
+    $workspaces = Get-ChildItem "$env:USERPROFILE\.openclaw" -Directory | 
+                  Where-Object { $_.Name -like "workspace-*" }
+    
+    if ($workspaces.Count -eq 1) {
+        # 只有一个工作区，直接返回
+        return $workspaces[0].FullName
+    } elseif ($workspaces.Count -gt 1) {
+        # 多个工作区，通过环境变量或当前目录判断
+        $currentDir = Get-Location
+        foreach ($ws in $workspaces) {
+            if ($currentDir.Path -like "$($ws.FullName)*") {
+                return $ws.FullName
+            }
+        }
+        # 默认返回第一个
+        return $workspaces[0].FullName
+    } else {
+        throw "No workspace found in .openclaw directory"
+    }
+}
+
+# 导出配置
+$SCRIPT:Workspace = Get-AgentWorkspace
+$SCRIPT:SelfImprovementDir = Join-Path $SCRIPT:Workspace "self-improvement"
+$SCRIPT:SharedContextDir = Join-Path $SCRIPT:Workspace "shared-context\self-improvement"
+
+# 确保目录存在
+if (-not (Test-Path $SCRIPT:SelfImprovementDir)) {
+    New-Item -ItemType Directory -Path $SCRIPT:SelfImprovementDir -Force | Out-Null
+}
+if (-not (Test-Path $SCRIPT:SharedContextDir)) {
+    New-Item -ItemType Directory -Path $SCRIPT:SharedContextDir -Force | Out-Null
+}
+```
+
 ### 1. 任务后评估脚本
 
 保存为：`scripts/self-improvement/evaluate-task.ps1`
@@ -21,6 +64,9 @@ param(
     [string]$TaskType,
     [hashtable]$Metrics
 )
+
+# 加载配置
+. "$PSScriptRoot\config.ps1"
 
 # 评分计算
 $completionScore = $Metrics.completion * 0.3
@@ -41,7 +87,7 @@ $evaluation = @{
 }
 
 # 保存评估结果
-$evalPath = "$env:USERPROFILE\.openclaw\workspace-dajia\self-improvement\evaluations.json"
+$evalPath = Join-Path $SCRIPT:SelfImprovementDir "evaluations.json"
 if (-not (Test-Path $evalPath)) {
     @{evaluations = @()} | ConvertTo-Json | Set-Content $evalPath
 }
@@ -53,7 +99,7 @@ $evalData | ConvertTo-Json -Depth 10 | Set-Content $evalPath
 # 触发优化（如果分数<70）
 if ($totalScore -lt 70) {
     Write-Host "⚠️  Score below 70, triggering optimization..." -ForegroundColor Yellow
-    & "$env:USERPROFILE\.openclaw\workspace-dajia\scripts\self-improvement\optimize-agent.ps1" -AgentId $AgentId
+    & "$PSScriptRoot\optimize-agent.ps1" -AgentId $AgentId
 }
 
 return $evaluation
@@ -71,6 +117,9 @@ param(
     [string]$Category
 )
 
+# 加载配置
+. "$PSScriptRoot\config.ps1"
+
 # 创建经验记录
 $lessonRecord = @{
     id = "lesson-$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -83,7 +132,7 @@ $lessonRecord = @{
 }
 
 # 保存到经验库
-$lessonsPath = "$env:USERPROFILE\.openclaw\workspace-dajia\self-improvement\lessons-learned.json"
+$lessonsPath = Join-Path $SCRIPT:SelfImprovementDir "lessons-learned.json"
 if (-not (Test-Path $lessonsPath)) {
     @{lessons = @()} | ConvertTo-Json | Set-Content $lessonsPath
 }
@@ -93,13 +142,12 @@ $lessonsData.lessons += $lessonRecord
 $lessonsData | ConvertTo-Json -Depth 10 | Set-Content $lessonsPath
 
 # 同步到共享知识库
-$sharedPath = "$env:USERPROFILE\.openclaw\workspace-dajia\shared-context\self-improvement\collective-wisdom.json"
-if (-not (Test-Path (Split-Path $sharedPath))) {
-    New-Item -ItemType Directory -Path (Split-Path $sharedPath) -Force | Out-Null
-}
-
+$sharedPath = Join-Path $SCRIPT:SharedContextDir "collective-wisdom.json"
 if (Test-Path $sharedPath) {
     $sharedData = Get-Content $sharedPath | ConvertFrom-Json
+    if (-not $sharedData.lessons) {
+        $sharedData | Add-Member -Type NoteProperty -Name "lessons" -Value @()
+    }
     $sharedData.lessons += $lessonRecord
     $sharedData | ConvertTo-Json -Depth 10 | Set-Content $sharedPath
 }
@@ -116,19 +164,23 @@ param(
     [string]$AgentId
 )
 
+# 加载配置
+. "$PSScriptRoot\config.ps1"
+
 Write-Host "=== Agent Optimization ===" -ForegroundColor Cyan
 Write-Host "Agent: $AgentId"
 Write-Host ""
 
 # 分析最近的评估
-$evalPath = "$env:USERPROFILE\.openclaw\workspace-dajia\self-improvement\evaluations.json"
+$evalPath = Join-Path $SCRIPT:SelfImprovementDir "evaluations.json"
 if (-not (Test-Path $evalPath)) {
     Write-Host "⚠️  No evaluations found" -ForegroundColor Yellow
     return
 }
 
 $evalData = Get-Content $evalPath | ConvertFrom-Json
-$recentEvals = $evalData.evaluations | Where-Object { $_.agentId -eq $AgentId } | Sort-Object timestamp -Descending | Select-Object -First 10
+$recentEvals = $evalData.evaluations | Where-Object { $_.agentId -eq $AgentId } | 
+                Sort-Object timestamp -Descending | Select-Object -First 10
 
 if ($recentEvals.Count -eq 0) {
     Write-Host "⚠️  No evaluations for this agent" -ForegroundColor Yellow
@@ -171,7 +223,7 @@ if ($lowScores.Count -gt 0) {
     }
 
     # 保存优化计划
-    $planPath = "$env:USERPROFILE\.openclaw\workspace-dajia\self-improvement\optimization-plan.json"
+    $planPath = Join-Path $SCRIPT:SelfImprovementDir "optimization-plan.json"
     $optimizationPlan | ConvertTo-Json -Depth 10 | Set-Content $planPath
 
     Write-Host ""
@@ -186,33 +238,44 @@ if ($lowScores.Count -gt 0) {
 保存为：`scripts/self-improvement/sync-learning.ps1`
 
 ```powershell
+# 加载配置
+. "$PSScriptRoot\config.ps1"
+
 Write-Host "=== Syncing Learning Across Agents ===" -ForegroundColor Cyan
 Write-Host ""
 
 # 读取共享知识库
-$sharedPath = "$env:USERPROFILE\.openclaw\workspace-dajia\shared-context\self-improvement\collective-wisdom.json"
+$sharedPath = Join-Path $SCRIPT:SharedContextDir "collective-wisdom.json"
 if (-not (Test-Path $sharedPath)) {
     Write-Host "⚠️  No shared knowledge found" -ForegroundColor Yellow
     return
 }
 
 $sharedData = Get-Content $sharedPath | ConvertFrom-Json
-Write-Host "Shared lessons: $($sharedData.lessons.Count)" -ForegroundColor Cyan
+$lessonCount = if ($sharedData.lessons) { $sharedData.lessons.Count } else { 0 }
+Write-Host "Shared lessons: $lessonCount" -ForegroundColor Cyan
 
 # 获取所有Agent
-$agentWorkspaces = Get-ChildItem "$env:USERPROFILE\.openclaw" -Directory | Where-Object { $_.Name -like "workspace-*" }
+$agentWorkspaces = Get-ChildItem "$env:USERPROFILE\.openclaw" -Directory | 
+                   Where-Object { $_.Name -like "workspace-*" }
 
 $syncedCount = 0
 foreach ($workspace in $agentWorkspaces) {
-    $agentId = $workspace.Name -replace "workspace-", ""
-
-    # 同步到各Agent
-    $localPath = "$($workspace.FullName)\self-improvement\collective-wisdom.json"
-    if (-not (Test-Path (Split-Path $localPath))) {
-        New-Item -ItemType Directory -Path (Split-Path $localPath) -Force | Out-Null
+    $sharedDir = Join-Path $workspace.FullName "shared-context\self-improvement"
+    
+    # 跳过源目录
+    if ($sharedDir -eq $SCRIPT:SharedContextDir) {
+        continue
+    }
+    
+    # 创建目标目录
+    if (-not (Test-Path $sharedDir)) {
+        New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null
     }
 
-    Copy-Item $sharedPath $localPath -Force
+    # 复制共享知识
+    $targetPath = Join-Path $sharedDir "collective-wisdom.json"
+    Copy-Item $sharedPath $targetPath -Force
     $syncedCount++
 }
 
@@ -227,6 +290,9 @@ Write-Host "✅ Synced to $syncedCount agents" -ForegroundColor Green
 ### 在每个Agent的任务执行脚本末尾添加：
 
 ```powershell
+# 加载配置
+. "$env:USERPROFILE\.openclaw\workspace-<agent-id>\scripts\self-improvement\config.ps1"
+
 # 任务完成后自动评估
 $metrics = @{
     completion = 90  # 完成度 0-100
@@ -235,12 +301,14 @@ $metrics = @{
     satisfaction = 85 # 满意度 0-100
 }
 
-& "$env:USERPROFILE\.openclaw\workspace-dajia\scripts\self-improvement\evaluate-task.ps1" `
-    -AgentId "dajia" `
+& "$env:USERPROFILE\.openclaw\workspace-<agent-id>\scripts\self-improvement\evaluate-task.ps1" `
+    -AgentId "<agent-id>" `
     -TaskId "task-001" `
     -TaskType "创作" `
     -Metrics $metrics
 ```
+
+**注意**: 将 `<agent-id>` 替换为实际的 Agent ID。
 
 ---
 
@@ -250,6 +318,7 @@ $metrics = @{
 
 ```powershell
 # 添加到定时任务
+$workspace = Get-AgentWorkspace
 $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File `"$workspace\scripts\self-improvement\sync-learning.ps1`""
 $trigger = New-ScheduledTaskTrigger -Daily -At "02:00"
 Register-ScheduledTask -TaskName "Self-Improvement Daily Sync" -Action $action -Trigger $trigger
